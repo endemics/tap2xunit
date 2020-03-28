@@ -1,0 +1,182 @@
+#!/bin/bash
+# tap to xunit converter
+
+# Globals
+OUTPUT=""
+NAME="test"
+TEE=1
+TEST_RESULTS=""
+
+usage () {
+  echo >&2
+  echo "Usage: $0 [-n <test-names> ] [-o <outputfile>] [-t]" >&2
+  echo " use -t to 'tee' output to both stdout as TAP and the output file as xunit" >&2
+  exit 1
+}
+
+output () {
+  if [ -n "${OUTPUT}" ]; then
+    echo "$@" >> "${OUTPUT}"
+  else
+    echo "$@"
+  fi
+}
+
+add_result () {
+  TEST_RESULTS=$(printf '%s\n%s' "${TEST_RESULTS}" "${1}")
+}
+
+add_ok_result () {
+  # TAP "ok" lines are of format 'ok 1 Description # Directive',
+  # with number (e.g. 1) and directive being optional
+  local name
+  name=$(echo "$1" | sed -n 's/^ok [0-9]*\s*\(.*\)#*.*$/\1/p')
+  add_result "  <testcase name=\"${name}\"/>"
+}
+
+add_skipped_result () {
+  # TAP "skip" lines contain the directive '# skip ',
+  # followed by an optional reason
+  # We support the skip after the name as in TAP 12 specs
+  # but also the way bats reports reasons between parenthesis
+  # followed by the name
+  local res
+  local name
+  local message
+  # First try to detect bats way of things
+  if echo "$1" | grep -q '^.* [0-9] # skip\s\{1,\}(.*'; then
+    res=$(echo "$1" | sed -n 's/^.*# skip\s\{1,\}\(([^)]\{1,\})\)\s*\(.*\)\s*$/\2#\1/p')
+    name=$(echo "${res}" | cut -d# -f1)
+    message=$(echo "${res}" | cut -d# -f2)
+  # Assume we are in the generic TAP spec case
+  else
+    name=$(echo "$1" | sed -n 's/^[^0-9]\{1,\}[0-9]*\s*\(.*\)\s# skip\s*.*$/\1/p')
+    message=$(echo "$1" | sed -n 's/^.*# skip *\(.*\)$/\1/p')
+  fi
+
+  add_result "  <testcase name=\"${name}\">"
+  if [ -z "${message}" ]; then
+    add_result "   <skipped/>"
+  else
+    add_result "   <skipped>${message}</skipped>"
+  fi
+  add_result "  </testcase>"
+}
+
+add_notok_header () {
+  # TAP "not ok" lines are of format 'not ok 1 Description # Directive',
+  # with number (e.g. 1) and directive being optional
+  # and followed by the error message
+  local name
+  name=$(echo "$1" | sed -n 's/^not ok [0-9]*\s*\(.*\)#*.*$/\1/p')
+  add_result "  <testcase name=\"${name}\">"
+}
+
+close_notok_result () {
+  if [ -z "${ERROR_MSG}" ]; then
+    add_result "   <failure/>"
+  else
+    add_result "   <failure>${ERROR_MSG}"
+    add_result "   </failure>"
+  fi
+  add_result "  </testcase>"
+}
+
+while getopts ":n:o:t" opt; do
+  case $opt in
+    n)
+      NAME=$OPTARG
+      ;;
+    o)
+      OUTPUT=$OPTARG
+      true > "${OUTPUT}"
+      ;;
+    t)
+      TEE=0
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      usage
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      usage
+      ;;
+  esac
+done
+
+if [ -z "${OUTPUT}" ] && [ ${TEE} -eq 0 ]; then
+  echo "You need to set an output in order to use the -t switch." >&2
+  usage
+fi
+
+TOTAL_CASES=0
+OK=0
+ERRORS=0
+NOTOK=0
+SKIPPED=0
+PARSING_BEGINS=1  # Have we seen the '1..N' line yet?
+ERROR_PARSING=1   # Have we seen an error yet?
+
+while IFS= read -r line;do
+  if [ ${TEE} -eq 0 ]; then
+    echo "${line}"
+  fi
+  # Test cases lines are of format '1..N'
+  if [ ${PARSING_BEGINS} -eq 1 ];then
+    if echo "${line}" | grep -qE '^1\.\.[0-9]*$'; then
+      PARSING_BEGINS=0
+      TOTAL_CASES=$(echo "$line" | sed -n 's/^1\.\.\([0-9]*\)/\1/p')
+    fi
+  elif [ ${PARSING_BEGINS} -eq 0 ]; then
+    # First let's deal with error parsing
+    if [ ${ERROR_PARSING} -eq 0 ];then
+      if echo "${line}" | grep -qE -e '^ok' -e '^not ok' -e '# skip'; then
+        # We have finished parsing errors
+        # - close the not ok result
+        # - reset everything
+        close_notok_result
+        ERROR_PARSING=1
+        ERROR_MSG=""
+      else
+        ERROR_MSG=$(printf '%s\n    %s' "${ERROR_MSG}" "${line}")
+      fi
+    fi
+    # Then SKIP takes precedence
+    if echo "${line}" | grep -qE '# skip'; then
+      (( SKIPPED = SKIPPED + 1 ))
+      add_skipped_result "${line}"
+    # OK lines
+    elif echo "${line}" | grep -qE '^ok'; then
+      (( OK = OK + 1 ))
+      add_ok_result "${line}"
+    # FAILURES lines
+    elif echo "${line}" | grep -qE '^not ok'; then
+      ERROR_PARSING=0
+      ERROR_MSG=""
+      (( NOTOK = NOTOK + 1 ))
+      add_notok_header "${line}"
+    fi
+  fi
+done
+
+# Make sure we output errors if have some outstanding one
+if [ ${PARSING_BEGINS} -eq 0 ] && [ ${ERROR_PARSING} -eq 0 ];then
+  close_notok_result
+fi
+
+# Only output result if there was some valid tap input
+if [ ${PARSING_BEGINS} -eq 0 ]; then
+  output '<?xml version="1.0"?>'
+  output '<testsuites>'
+  output " <testsuite name=\"${NAME}\" tests=\"${TOTAL_CASES}\" failures=\"${NOTOK}\" skipped=\"${SKIPPED}\" errors=\"${ERRORS}\">${TEST_RESULTS}"
+  output ' </testsuite>'
+  output '</testsuites>'
+fi
+
+# Return correct return code depending on results
+if [ ${NOTOK} -gt 0 ] || [ ${ERRORS} -gt 0 ]; then
+  exit 1
+else
+  exit 0
+fi
