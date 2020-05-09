@@ -1,5 +1,7 @@
 # tap2xunit
 
+[![Build Status](https://travis-ci.org/endemics/tap2xunit.svg?branch=master)](https://travis-ci.org/endemics/tap2xunit)
+
 tap2xunit is a shell script to convert [tap](https://testanything.org/tap-specification.html) outputs to Xunit format.
 
 This is for instance useful if you are running [bats](https://github.com/bats-core/bats-core) tests and want the output to be converted to a format automatically supported by [Bitbucket Pipelines](https://confluence.atlassian.com/bitbucket/test-reporting-in-pipelines-939708543.html), which was the reason why I needed this in the first place.
