@@ -1,6 +1,6 @@
 # tap2xunit
 
-[![Build Status](https://travis-ci.org/endemics/tap2xunit.svg?branch=master)](https://travis-ci.org/endemics/tap2xunit)
+![Build Status](https://github.com/endemics/tap2xunit/workflows/lint%20and%20test/badge.svg)
 
 tap2xunit is a shell script to convert [tap](https://testanything.org/tap-specification.html) outputs to Xunit format.
 
