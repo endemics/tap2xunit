@@ -10,4 +10,4 @@ test:
 	docker run --rm \
 	    -v $(PWD):/src \
 	    -w /src \
-	    dduportal/bats:1.1.0 tests/*.bats
+	    bats/bats:1.11.1 tests/*.bats
