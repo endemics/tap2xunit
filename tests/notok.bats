@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
-load ${BATS_HELPERS_DIR}/bats-support/load.bash
-load ${BATS_HELPERS_DIR}/bats-assert/load.bash
+setup() {
+    bats_load_library bats-support
+    bats_load_library bats-assert
+}
 
 @test "tap file with one failed test, no diagnostics" {
     NOTOK_TAP="1..1
